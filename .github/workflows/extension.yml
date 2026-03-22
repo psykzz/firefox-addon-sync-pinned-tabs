@@ -1,0 +1,39 @@
+name: Build and Release Extension
+
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types:
+      - created
+
+jobs:
+  build:
+    name: Package extension zip
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build extension zip
+        run: |
+          cd extension
+          zip -r ../sync-pinned-tabs-extension.zip . \
+            --exclude "*.git*" \
+            --exclude "__pycache__/*"
+
+      - name: Upload zip as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-pinned-tabs-extension
+          path: sync-pinned-tabs-extension.zip
+
+      - name: Attach zip to GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: sync-pinned-tabs-extension.zip

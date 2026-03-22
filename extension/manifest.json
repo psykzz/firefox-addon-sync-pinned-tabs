@@ -1,0 +1,32 @@
+{
+  "manifest_version": 2,
+  "name": "Sync Pinned Tabs",
+  "version": "1.0.0",
+  "description": "Sync your pinned tabs across devices.",
+  "icons": {
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png"
+  },
+  "permissions": [
+    "tabs",
+    "storage",
+    "alarms"
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
+  "browser_action": {
+    "default_icon": {
+      "48": "icons/icon-48.png"
+    },
+    "default_title": "Sync Pinned Tabs",
+    "default_popup": "popup/popup.html"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "sync-pinned-tabs@example.com",
+      "strict_min_version": "78.0"
+    }
+  }
+}
