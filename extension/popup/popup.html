@@ -48,6 +48,18 @@
       background: #b8b8cc;
       cursor: default;
     }
+    .settings-link {
+      display: block;
+      margin-top: 10px;
+      font-size: 11px;
+      color: #8080a0;
+      text-align: right;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    .settings-link:hover {
+      color: #0060df;
+    }
   </style>
 </head>
 <body>
@@ -55,6 +67,7 @@
   <p id="profile-id">Loading…</p>
   <p id="status"></p>
   <button id="sync-btn">Sync Now</button>
+  <a class="settings-link" id="settings-link">Settings</a>
   <script src="popup.js"></script>
 </body>
 </html>

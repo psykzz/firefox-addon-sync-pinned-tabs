@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sync Pinned Tabs – Settings</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 480px;
+      padding: 24px 16px;
+      margin: 0 auto;
+      background: #f9f9fb;
+      color: #1c1b22;
+    }
+    h1 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0 0 16px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    input[type="url"] {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      font-size: 13px;
+      border: 1px solid #b8b8cc;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+    .hint {
+      font-size: 11px;
+      color: #8080a0;
+      margin-bottom: 16px;
+    }
+    button {
+      padding: 8px 16px;
+      font-size: 13px;
+      cursor: pointer;
+      background: #0060df;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+    }
+    button:hover {
+      background: #0250bb;
+    }
+    #save-status {
+      display: inline-block;
+      font-size: 12px;
+      color: #5b5b66;
+      margin-left: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Sync Pinned Tabs – Settings</h1>
+
+  <label for="server-url">Sync server URL</label>
+  <input
+    type="url"
+    id="server-url"
+    placeholder="https://firefox.neeko.psykzz.com"
+    spellcheck="false"
+  />
+  <p class="hint">
+    Leave blank to use the default server:
+    <code>https://firefox.neeko.psykzz.com</code>
+  </p>
+  <p class="hint">Currently active: <strong id="active-server"></strong></p>
+
+  <button id="save-btn">Save</button>
+  <span id="save-status"></span>
+
+  <script src="options.js"></script>
+</body>
+</html>

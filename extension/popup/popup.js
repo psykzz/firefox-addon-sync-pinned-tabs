@@ -1,6 +1,7 @@
 const profileIdEl = document.getElementById("profile-id");
 const statusEl = document.getElementById("status");
 const syncBtn = document.getElementById("sync-btn");
+const settingsLink = document.getElementById("settings-link");
 
 async function load(key) {
   const result = await browser.storage.local.get(key);
@@ -36,6 +37,10 @@ syncBtn.addEventListener("click", async () => {
   } finally {
     syncBtn.disabled = false;
   }
+});
+
+settingsLink.addEventListener("click", () => {
+  browser.runtime.openOptionsPage();
 });
 
 render();

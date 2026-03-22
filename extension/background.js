@@ -10,8 +10,17 @@
  * A periodic alarm re-runs the sync every SYNC_INTERVAL_MINUTES minutes.
  */
 
-const SERVER_BASE = "https://sync-pinned-tabs.example.com";
+const DEFAULT_SERVER_BASE = "https://firefox.neeko.psykzz.com";
 const SYNC_INTERVAL_MINUTES = 15;
+
+/**
+ * Return the configured server base URL, falling back to the default.
+ * @returns {Promise<string>}
+ */
+async function getServerBase() {
+  const url = await load("serverBase");
+  return url || DEFAULT_SERVER_BASE;
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -78,7 +87,8 @@ async function applyRemoteTabs(remoteTabs) {
  * @returns {Promise<string>} The assigned profile ID.
  */
 async function registerProfile() {
-  const response = await fetch(`${SERVER_BASE}/profiles`, {
+  const serverBase = await getServerBase();
+  const response = await fetch(`${serverBase}/profiles`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -96,7 +106,8 @@ async function registerProfile() {
  * @returns {Promise<{tabs: Array<{url: string, title: string}>, last_modified: string|null}>}
  */
 async function fetchRemoteTabs(profileId) {
-  const response = await fetch(`${SERVER_BASE}/profiles/${profileId}/tabs`);
+  const serverBase = await getServerBase();
+  const response = await fetch(`${serverBase}/profiles/${profileId}/tabs`);
   if (!response.ok) {
     throw new Error(`Failed to fetch remote tabs: ${response.status}`);
   }
@@ -110,7 +121,8 @@ async function fetchRemoteTabs(profileId) {
  * @param {string} lastModified  ISO-8601 timestamp of the local last-modified time.
  */
 async function pushTabs(profileId, tabs, lastModified) {
-  const response = await fetch(`${SERVER_BASE}/profiles/${profileId}/tabs`, {
+  const serverBase = await getServerBase();
+  const response = await fetch(`${serverBase}/profiles/${profileId}/tabs`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tabs, last_modified: lastModified }),
