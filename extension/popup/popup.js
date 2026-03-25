@@ -1,21 +1,9 @@
-const profileIdEl = document.getElementById("profile-id");
 const statusEl = document.getElementById("status");
 const syncBtn = document.getElementById("sync-btn");
 
-async function load(key) {
-  const result = await browser.storage.local.get(key);
-  return result[key];
-}
-
 async function render() {
-  const profileId = await load("profileId");
-  const lastModified = await load("lastModified");
-
-  if (profileId) {
-    profileIdEl.textContent = `Profile ID: ${profileId}`;
-  } else {
-    profileIdEl.textContent = "No profile yet – sync to register.";
-  }
+  const result = await browser.storage.local.get("lastModified");
+  const lastModified = result.lastModified;
 
   if (lastModified) {
     statusEl.textContent = `Last synced: ${new Date(lastModified).toLocaleString()}`;

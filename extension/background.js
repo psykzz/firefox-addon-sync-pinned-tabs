@@ -1,222 +1,172 @@
 /**
  * Sync Pinned Tabs - Background Script
  *
- * On install / browser start:
- *   1. Load the stored identity (userId) and last-sync timestamp.
- *   2. If no userId, register with the server to get one.
- *   3. Fetch the remote tab-list and compare last-modified dates.
- *   4. Apply whichever side (local or remote) is newer.
+ * Uses browser.storage.sync to keep pinned tabs in sync across devices
+ * (including Firefox for Android – no browser.windows dependency).
  *
- * A periodic alarm re-runs the sync every SYNC_INTERVAL_MINUTES minutes.
+ * On install / browser start:
+ *   1. If sync storage already has pinned tabs, apply them locally.
+ *   2. Otherwise, push the current local pinned tabs to sync storage.
+ *
+ * Changes are propagated reactively via browser.storage.onChanged, so no
+ * polling alarm is required.
  */
 
-const SERVER_BASE = "https://sync-pinned-tabs.example.com";
-const SYNC_INTERVAL_MINUTES = 15;
+// How long (ms) to keep isSyncing=true after the last tab operation fires,
+// so that the resulting onUpdated/onRemoved events are still in-flight
+// when we clear the flag and do not re-trigger a redundant push.
+const SYNC_SETTLE_MS = 200;
+
+// Guard: set to true while applying a remote change so that the resulting
+// tab events don't immediately overwrite sync storage with an intermediate state.
+let isSyncing = false;
+
+// IDs of tabs we know to be pinned, kept in sync with onUpdated/onRemoved.
+// Used to skip onRemoved events for non-pinned tabs.
+const pinnedTabIds = new Set();
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Persist a key/value pair in extension storage.
- * @param {string} key
- * @param {*} value
+ * Return the URLs of all pinned tabs across every open window, de-duplicated.
+ * Uses browser.tabs.query so it works on Firefox for Android (no windows API).
+ * @returns {Promise<string[]>}
  */
-async function store(key, value) {
-  await browser.storage.local.set({ [key]: value });
-}
-
-/**
- * Read a value from extension storage.
- * @param {string} key
- * @returns {Promise<*>}
- */
-async function load(key) {
-  const result = await browser.storage.local.get(key);
-  return result[key];
-}
-
-/**
- * Return the pinned tabs in every open window as a plain array of objects.
- * @returns {Promise<Array<{url: string, title: string}>>}
- */
-async function getLocalPinnedTabs() {
+async function getLocalPinnedUrls() {
   const tabs = await browser.tabs.query({ pinned: true });
-  return tabs.map((t) => ({ url: t.url, title: t.title || "" }));
-}
-
-/**
- * Replace the currently-pinned tabs with the supplied list.
- * We open each URL in a new pinned tab, then close the ones that were already
- * pinned but are no longer in the list.
- *
- * @param {Array<{url: string, title: string}>} remoteTabs
- */
-async function applyRemoteTabs(remoteTabs) {
-  const currentPinned = await browser.tabs.query({ pinned: true });
-  const currentUrls = new Set(currentPinned.map((t) => t.url));
-  const remoteUrls = new Set(remoteTabs.map((t) => t.url));
-
-  // Open tabs that are remote but not local
-  for (const tab of remoteTabs) {
-    if (!currentUrls.has(tab.url)) {
-      await browser.tabs.create({ url: tab.url, pinned: true, active: false });
+  const seen = new Set();
+  const urls = [];
+  for (const tab of tabs) {
+    if (!seen.has(tab.url)) {
+      seen.add(tab.url);
+      urls.push(tab.url);
     }
   }
+  return urls;
+}
 
-  // Close tabs that are local but not remote
+/**
+ * Open missing pinned tabs and close extra ones to match the supplied URL list.
+ * Sets isSyncing=true for the duration so that the resulting tab events do not
+ * trigger a redundant push back to sync storage.
+ * Returns immediately (without touching isSyncing) when no changes are needed.
+ *
+ * @param {string[]} urls
+ */
+async function applyPinnedUrls(urls) {
+  const currentPinned = await browser.tabs.query({ pinned: true });
+  const currentUrls = new Set(currentPinned.map((t) => t.url));
+  const targetUrls = new Set(urls);
+
+  const toAdd = urls.filter((url) => !currentUrls.has(url));
   const toClose = currentPinned
-    .filter((t) => !remoteUrls.has(t.url))
+    .filter((t) => !targetUrls.has(t.url))
     .map((t) => t.id);
-  if (toClose.length > 0) {
-    await browser.tabs.remove(toClose);
-  }
-}
 
-// ── server communication ──────────────────────────────────────────────────────
+  // Nothing to do – return without touching isSyncing so tab events still fire.
+  if (toAdd.length === 0 && toClose.length === 0) return;
 
-/**
- * Register a new profile on the server.
- * @returns {Promise<string>} The assigned profile ID.
- */
-async function registerProfile() {
-  const response = await fetch(`${SERVER_BASE}/profiles`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to register profile: ${response.status}`);
-  }
-  const data = await response.json();
-  return data.id;
-}
-
-/**
- * Fetch the remote pinned-tab list for a profile.
- * @param {string} profileId
- * @returns {Promise<{tabs: Array<{url: string, title: string}>, last_modified: string|null}>}
- */
-async function fetchRemoteTabs(profileId) {
-  const response = await fetch(`${SERVER_BASE}/profiles/${profileId}/tabs`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch remote tabs: ${response.status}`);
-  }
-  return response.json();
-}
-
-/**
- * Push the local pinned-tab list to the server.
- * @param {string} profileId
- * @param {Array<{url: string, title: string}>} tabs
- * @param {string} lastModified  ISO-8601 timestamp of the local last-modified time.
- */
-async function pushTabs(profileId, tabs, lastModified) {
-  const response = await fetch(`${SERVER_BASE}/profiles/${profileId}/tabs`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tabs, last_modified: lastModified }),
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to push tabs: ${response.status}`);
+  isSyncing = true;
+  try {
+    await Promise.all(
+      toAdd.map((url) => browser.tabs.create({ url, pinned: true, active: false }))
+    );
+    if (toClose.length > 0) {
+      await browser.tabs.remove(toClose);
+    }
+  } finally {
+    setTimeout(() => {
+      isSyncing = false;
+    }, SYNC_SETTLE_MS);
   }
 }
 
 // ── sync logic ────────────────────────────────────────────────────────────────
 
 /**
- * Perform a full sync cycle:
- *   • Register if needed.
- *   • Compare local vs remote last-modified.
- *   • Apply the newer side.
+ * Push the current local pinned tabs to sync storage.
+ * Skipped while a remote sync is being applied (isSyncing guard).
  */
-async function sync() {
-  let profileId = await load("profileId");
+async function pushLocalToSync() {
+  if (isSyncing) return;
+  const urls = await getLocalPinnedUrls();
+  await browser.storage.sync.set({ pinnedTabs: urls });
+  await browser.storage.local.set({ lastModified: new Date().toISOString() });
+  console.log("Sync Pinned Tabs: saved", urls.length, "tab(s) to sync storage");
+}
 
-  // ── 1. Register if this is the first run ──
-  if (!profileId) {
-    try {
-      profileId = await registerProfile();
-      await store("profileId", profileId);
-      console.log("Sync Pinned Tabs: registered new profile", profileId);
-    } catch (err) {
-      console.error("Sync Pinned Tabs: registration failed", err);
-      return;
-    }
-  }
+/**
+ * Initialise on install/startup:
+ *   • If sync storage has tabs, apply them locally.
+ *   • Otherwise, push the local state so other devices can pick it up.
+ */
+async function init() {
+  // Seed pinnedTabIds from the current browser state.
+  const currentPinned = await browser.tabs.query({ pinned: true });
+  currentPinned.forEach((t) => pinnedTabIds.add(t.id));
 
-  // ── 2. Fetch remote state ──
-  let remote;
-  try {
-    remote = await fetchRemoteTabs(profileId);
-  } catch (err) {
-    console.error("Sync Pinned Tabs: fetch failed", err);
-    return;
-  }
+  const data = await browser.storage.sync.get("pinnedTabs");
+  const syncedUrls = data.pinnedTabs;
 
-  // ── 3. Compare timestamps ──
-  const localLastModified = (await load("lastModified")) || null;
-  const remoteLastModified = remote.last_modified || null;
-
-  const localIsNewer =
-    !remoteLastModified ||
-    (localLastModified &&
-      new Date(localLastModified) > new Date(remoteLastModified));
-
-  if (localIsNewer) {
-    // Push local tabs to server
-    try {
-      const localTabs = await getLocalPinnedTabs();
-      const now = new Date().toISOString();
-      await pushTabs(profileId, localTabs, now);
-      await store("lastModified", now);
-      console.log("Sync Pinned Tabs: pushed local tabs to server");
-    } catch (err) {
-      console.error("Sync Pinned Tabs: push failed", err);
-    }
+  if (Array.isArray(syncedUrls) && syncedUrls.length > 0) {
+    console.log(
+      "Sync Pinned Tabs: found",
+      syncedUrls.length,
+      "tab(s) in sync storage, applying locally"
+    );
+    await applyPinnedUrls(syncedUrls);
+    await browser.storage.local.set({ lastModified: new Date().toISOString() });
   } else {
-    // Apply remote tabs locally
-    try {
-      await applyRemoteTabs(remote.tabs || []);
-      await store("lastModified", remoteLastModified);
-      console.log("Sync Pinned Tabs: applied remote tabs");
-    } catch (err) {
-      console.error("Sync Pinned Tabs: apply failed", err);
-    }
+    console.log(
+      "Sync Pinned Tabs: no synced tabs found, uploading local state"
+    );
+    await pushLocalToSync();
   }
 }
 
 // ── event listeners ───────────────────────────────────────────────────────────
 
-browser.runtime.onInstalled.addListener(async () => {
-  await sync();
-  browser.alarms.create("syncPinnedTabs", {
-    periodInMinutes: SYNC_INTERVAL_MINUTES,
+browser.runtime.onInstalled.addListener(init);
+browser.runtime.onStartup.addListener(init);
+
+// React to changes pushed by another device via Firefox Sync.
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync" || !changes.pinnedTabs) return;
+  const newUrls = changes.pinnedTabs.newValue || [];
+  console.log(
+    "Sync Pinned Tabs: remote change detected, applying",
+    newUrls.length,
+    "tab(s)"
+  );
+  applyPinnedUrls(newUrls).then(() => {
+    return browser.storage.local.set({ lastModified: new Date().toISOString() });
   });
 });
 
-browser.runtime.onStartup.addListener(async () => {
-  await sync();
-  // Recreate the alarm in case it was cleared.
-  browser.alarms.create("syncPinnedTabs", {
-    periodInMinutes: SYNC_INTERVAL_MINUTES,
-  });
+// Keep pinnedTabIds up to date and push to sync whenever pinned state changes.
+browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!("pinned" in changeInfo)) return;
+  if (changeInfo.pinned) {
+    pinnedTabIds.add(tabId);
+  } else {
+    pinnedTabIds.delete(tabId);
+  }
+  pushLocalToSync();
 });
 
-browser.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "syncPinnedTabs") {
-    sync();
-  }
-});
-
-// Re-sync whenever a tab is pinned or unpinned.
-browser.tabs.onUpdated.addListener((_tabId, changeInfo) => {
-  if ("pinned" in changeInfo) {
-    sync();
-  }
+// Save when a pinned tab is closed directly (without unpinning first).
+// Skip the push for non-pinned tabs to avoid unnecessary sync operations.
+browser.tabs.onRemoved.addListener((tabId) => {
+  if (!pinnedTabIds.has(tabId)) return;
+  pinnedTabIds.delete(tabId);
+  // Slight delay to ensure the tab is no longer returned by browser.tabs.query.
+  setTimeout(pushLocalToSync, 50);
 });
 
 // Allow the popup to trigger a manual sync.
 browser.runtime.onMessage.addListener((message) => {
   if (message && message.action === "sync") {
-    return sync();
+    return init();
   }
 });
+
