@@ -1,22 +1,9 @@
-const profileIdEl = document.getElementById("profile-id");
 const statusEl = document.getElementById("status");
 const syncBtn = document.getElementById("sync-btn");
-const settingsLink = document.getElementById("settings-link");
-
-async function load(key) {
-  const result = await browser.storage.local.get(key);
-  return result[key];
-}
 
 async function render() {
-  const profileId = await load("profileId");
-  const lastModified = await load("lastModified");
-
-  if (profileId) {
-    profileIdEl.textContent = `Profile ID: ${profileId}`;
-  } else {
-    profileIdEl.textContent = "No profile yet – sync to register.";
-  }
+  const result = await browser.storage.local.get("lastModified");
+  const lastModified = result.lastModified;
 
   if (lastModified) {
     statusEl.textContent = `Last synced: ${new Date(lastModified).toLocaleString()}`;
@@ -37,10 +24,6 @@ syncBtn.addEventListener("click", async () => {
   } finally {
     syncBtn.disabled = false;
   }
-});
-
-settingsLink.addEventListener("click", () => {
-  browser.runtime.openOptionsPage();
 });
 
 render();

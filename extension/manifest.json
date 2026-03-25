@@ -9,14 +9,8 @@
   },
   "permissions": [
     "tabs",
-    "storage",
-    "alarms",
-    "<all_urls>"
+    "storage"
   ],
-  "options_ui": {
-    "page": "options/options.html",
-    "browser_style": true
-  },
   "background": {
     "scripts": ["background.js"],
     "persistent": false
